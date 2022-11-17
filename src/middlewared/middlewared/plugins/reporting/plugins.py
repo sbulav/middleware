@@ -4,7 +4,7 @@ import os
 import re
 import subprocess
 
-from .rrd_utils import RRDBase, RRDType
+from .rrd_utils import RRDBase, RRD_BASE_DIR_PATH, RRDType
 
 
 class CPUPlugin(RRDBase):
@@ -361,3 +361,92 @@ class ARCResultPlugin(RRDBase):
 
     def get_identifiers(self):
         return ['demand_data', 'demand_metadata', 'prefetch_data', 'prefetch_metadata']
+
+class UPSBase:
+
+    plugin = 'nut'
+
+    @property
+    def _base_path(self):
+        ups_config = self.middleware.call_sync('ups.config')
+        if ups_config['mode'] == 'SLAVE':
+            remote_host = os.path.join(RRD_BASE_DIR_PATH, ups_config['remotehost'])
+            try:
+                files = os.listdir(remote_host)
+            except FileNotFoundError:
+                return super()._base_path
+            else:
+                if not any(f.endswith('.rrd') for f in files):
+                    remote_host = next(
+                        (
+                            f for f in sorted(
+                                filter(os.path.isdir, map(lambda f: os.path.join(remote_host, f), files)),
+                                key=lambda f: os.path.getmtime(f), reverse=True
+                            )
+                        ),
+                        remote_host
+                    )
+                return remote_host
+        else:
+            return super()._base_path
+
+    def get_identifiers(self):
+        ups_identifier = self.middleware.call_sync('ups.config')['identifier']
+
+        if all(os.path.exists(os.path.join(self._base_path, f'{self.plugin}-{ups_identifier}', f'{rrd_type.type}.rrd'))
+               for rrd_type in self.rrd_types):
+            return [ups_identifier]
+
+        return []
+
+
+class UPSBatteryChargePlugin(UPSBase, RRDBase):
+
+    title = 'UPS Battery Statistics'
+    vertical_label = 'Percent'
+    rrd_types = (
+        RRDType('percent-charge', 'value', None),
+    )
+
+
+class UPSRemainingBatteryPlugin(UPSBase, RRDBase):
+
+    title = 'UPS Battery Time Remaining Statistics'
+    vertical_label = 'Minutes'
+    rrd_types = (
+        RRDType('timeleft-battery', 'value', '%name%,60,/'),
+    )
+
+class UPSTemperaturePlugin(UPSBase, RRDBase):
+
+    title = 'UPS Temperature statistics'
+    vertical_label = 'Celsius'
+    rrd_types = (
+        RRDType('temperature-ups', 'value', None),
+    )
+
+class UPSVoltagePlugin(UPSBase, RRDBase):
+
+    title = 'UPS Voltage'
+    vertical_label = 'Voltage'
+    rrd_types = (
+            RRDType('voltage-input', 'value', None),
+            RRDType('voltage-output', 'value', None),
+    )
+
+class UPSOutputCurrentPlugin(UPSBase, RRDBase):
+
+    title = 'UPS Output Current'
+    vertical_label = 'Ampere'
+    rrd_types = (
+            RRDType('current-output', 'value', None),
+    )
+
+class UPSLoadPlugin(UPSBase, RRDBase):
+
+    title = 'UPS Load'
+    vertical_label = 'Percent'
+    rrd_types = (
+            RRDType('percent-load', 'value', None),
+    )
+
